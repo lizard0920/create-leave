@@ -46,6 +46,7 @@
     .result {
       margin-top: 20px;
       font-size: 1.1em;
+      word-break: break-word;
     }
     .label {
       font-weight: bold;
@@ -57,10 +58,10 @@
   <div class="container">
     <h2>請假計算</h2>
     <label for="leaveStart">請假起：</label>
-    <input type="time" id="leaveStart" />
+    <input type="time" id="leaveStart" step="1800" />
 
     <label for="leaveEnd">請假迄：</label>
-    <input type="time" id="leaveEnd" />
+    <input type="time" id="leaveEnd" step="1800" />
 
     <button onclick="calculateLeave()">計算</button>
 
@@ -77,20 +78,35 @@
   </div>
 
   <script>
+    // 強制分鐘只允許00或30，四捨五入
+    function normalizeTime(timeStr) {
+      let [h, m] = timeStr.split(":").map(Number);
+      if (m < 15) m = 0;
+      else if (m < 45) m = 30;
+      else {
+        m = 0;
+        h = (h + 1) % 24;
+      }
+      return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+    }
+
+    // 轉成小時小數
     function parseTimeToDecimal(timeStr) {
       const [hour, minute] = timeStr.split(":").map(Number);
       return hour + minute / 60;
     }
 
+    // 小時小數轉回HH:MM
     function formatDecimalToHHMM(decimal) {
       const hour = Math.floor(decimal);
       const minute = Math.round((decimal - hour) * 60);
-      return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+      return `${String(hour).padStart(2,"0")}:${String(minute).padStart(2,"0")}`;
     }
 
+    // 主計算函式
     function calculateLeave() {
-      const start = document.getElementById("leaveStart").value;
-      const end = document.getElementById("leaveEnd").value;
+      let start = document.getElementById("leaveStart").value;
+      let end = document.getElementById("leaveEnd").value;
       const leaveHourEl = document.getElementById("leaveHour");
       const leaveRangeEl = document.getElementById("leaveRange");
       const leavePunchEl = document.getElementById("leavePunch");
@@ -102,9 +118,14 @@
         return;
       }
 
+      // 正規化時間
+      start = normalizeTime(start);
+      end = normalizeTime(end);
+
       const startDec = parseTimeToDecimal(start);
       const endDec = parseTimeToDecimal(end);
 
+      // 計算午休扣除
       let breakDeduct = 0;
       if (startDec < 13 && endDec > 13) {
         breakDeduct = 1;
@@ -115,36 +136,60 @@
       let leaveHours = endDec - startDec - breakDeduct;
       if (leaveHours < 0) leaveHours = 0;
 
-      // Leave Range
+      // 應請假時間顯示
       let leaveRangeText = `${start} - ${end}`;
       if (start === "09:00" && (end === "12:30" || end === "13:00")) {
         leaveRangeText = "09:00 - 12:00";
       }
 
-      // Punch Time
+      // 應打卡時間判斷，參考Excel公式
+      function timeToNumber(t) {
+        const [h, m] = t.split(":").map(Number);
+        return h + m / 60;
+      }
+      const T9 = timeToNumber("09:00");
+      const T12 = timeToNumber("12:00");
+      const T1230 = timeToNumber("12:30");
+      const T13 = timeToNumber("13:00");
+      const T1330 = timeToNumber("13:30");
+      const T14 = timeToNumber("14:00");
+      const T18 = timeToNumber("18:00");
+
       let punchText = "";
-      if (start !== "09:00" || end !== "18:00") {
-        punchText = "09:00 - 18:00";
-      }
 
-      if (start === "09:00" && end === "18:00") {
+      if (timeToNumber(start) >= timeToNumber(end)) {
         punchText = "";
-      } else if (start >= "09:00" && end <= "12:00") {
-        punchText = `${end}`;
-      } else if (start >= "09:00" && (end === "12:30" || end === "13:00")) {
-        punchText = "12:00";
-      } else if (start >= "09:00" && end === "13:30") {
-        punchText = "12:30";
-      } else if (start >= "09:00") {
-        punchText = "09:00";
+      } else if (start !== "09:00" && end !== "18:00") {
+        punchText = "09:00 - 18:00";
+      } else if (start === "09:00" && end === "18:00") {
+        punchText = "";
+      } else {
+        let morningPunch = "";
+        let afternoonPunch = "";
+
+        if (timeToNumber(start) >= T9 && timeToNumber(end) <= T12) {
+          morningPunch = end;
+        } else if (timeToNumber(start) >= T9 && (end === "12:30" || end === "13:00")) {
+          morningPunch = "12:00";
+        } else if (timeToNumber(start) >= T9 && end === "13:30") {
+          morningPunch = "12:30";
+        } else if (timeToNumber(start) >= T9) {
+          morningPunch = "09:00";
+        } else {
+          morningPunch = "X"; // 可自行調整
+        }
+
+        if (timeToNumber(start) >= T13 && timeToNumber(start) <= T14) {
+          afternoonPunch = formatDecimalToHHMM(timeToNumber(start) - 1);
+        } else if (timeToNumber(start) >= T9 && end === "18:00") {
+          afternoonPunch = start;
+        } else {
+          afternoonPunch = "18:00";
+        }
+
+        punchText = `${morningPunch} - ${afternoonPunch}`;
       }
 
-      // For range formatting
-      if (punchText.includes(":") && !punchText.includes(" - ")) {
-        punchText = `09:00 - ${punchText}`;
-      }
-
-      // Output
       leaveHourEl.textContent = leaveHours.toFixed(2) + " 小時";
       leaveRangeEl.textContent = leaveRangeText;
       leavePunchEl.textContent = punchText;
